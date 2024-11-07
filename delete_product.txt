@@ -1,0 +1,68 @@
+PRODUCT DELETE VIEW
+class ProductsDestroyAPIView(generics.DestroyAPIView):
+    queryset = Products.objects.using('default').all()
+    serializer_class = ProductsSerializer
+    lookup_field = 'pk'
+
+    def delete(self, request, *args, **kwargs):
+        # Get the product ID from the URL
+        productid = self.kwargs.get(self.lookup_field)
+        
+        # Attempt to delete the product using the custom delete_product method
+        result = Products.delete_product(productid)
+        
+        # Check if the result message indicates successful deletion
+        if result.get("message") == "Product deleted successfully.":
+            return Response(result, status=status.HTTP_204_NO_CONTENT)
+        
+        # Return the message from delete_product with a status of 400 Bad Request
+        return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+products_destroy_view = ProductsDestroyAPIView.as_view()
+
+
+
+DELETE PRODUCT METHOD
+ @staticmethod
+    def delete_product(productid):
+        """
+        Custom method to delete a product from the 'default' database
+        after checking sales and inventory records in other databases.
+        """
+        tables = [
+            {"db": "oshodi", "table": Sales, "name": "oshodi_sales"},
+            {"db": "oshodi", "table": Inventory, "name": "oshodi_inventory"},
+            {"db": "ojota", "table": Sales, "name": "ojota_sales"},
+            {"db": "ojota", "table": Inventory, "name": "ojota_inventory"}
+        ]
+
+
+        # Check if the product exists in the 'default' database
+        try:
+            product_instance = Products.objects.using('default').get(id=productid)
+        except Products.DoesNotExist:
+            return {"message": "Product does not exist."}
+
+        for entry in tables:
+            try:
+                # Check for sales or inventory records in the specified table of each database
+                exists = entry["table"].objects.using(entry["db"]).filter(productid=productid).exists()
+
+                print(f"Checking {entry['name']} in {entry['db']} for product_id {productid}: {'Exists' if exists else 'Does not exist'}")
+                
+                # If any records are found, return a message and stop deletion
+                if exists:
+                    return {"message": "Products with sales or inventory records cannot be deleted."}
+            
+            except Exception as e:
+                # If an error occurs due to a missing table, log it and continue
+                print(f"Skipping check for {entry['name']} due to error: {e}")
+                continue
+        # No records found in sales or inventory; proceed with deletion in 'default' database
+        product_instance.delete(using='default')
+        return {"message": "Product deleted successfully."}
+
+
+
+PRODUCT DELETE URL
+path('<int:pk>/delete/', views.products_destroy_view),
